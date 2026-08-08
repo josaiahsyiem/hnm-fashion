@@ -35,10 +35,8 @@ def candidate_recall(candidates: pl.DataFrame, valid: pl.DataFrame) -> dict:
     Recall = (true purchases that appear as a candidate) / (all true purchases),
     over customers who bought something in the held-out week.
     """
-    # One row per (customer, true article).
     truth = valid.explode("actual").rename({"actual": "article_id"})
 
-    # Distinct candidate pairs, tagged so we can detect matches after the join.
     cand_pairs = (
         candidates.select(["customer_id", "article_id"])
         .unique()
@@ -75,10 +73,53 @@ def popularity_candidates(train: pl.DataFrame, valid_customers: pl.Series,
         .sort("len", descending=True)
         .head(n)["article_id"]
     )
-    # Cross-join: every scored customer gets every popular article.
     cands = (
         pl.DataFrame({"customer_id": valid_customers})
         .join(pl.DataFrame({"article_id": top}), how="cross")
         .with_columns(pl.lit("popular").alias("method"))
+    )
+    return cands
+
+
+def item2item_candidates(train: pl.DataFrame, valid_customers: pl.Series,
+                         recent_weeks: int = 6, top_partners: int = 12,
+                         cust_recent_weeks: int = 4) -> pl.DataFrame:
+    """'Customers who bought X also bought Y' candidates.
+
+    Build article co-occurrence from recent weeks, then for each scored
+    customer's recent purchases, propose the top co-occurring partners.
+    Captures substitution/complement buying that repurchase and popularity miss.
+    """
+    last = train["week"].max()
+    recent = train.filter(pl.col("week") > last - recent_weeks) \
+                  .select(["customer_id", "article_id"]).unique()
+
+    pairs = (
+        recent.join(recent, on="customer_id")
+        .filter(pl.col("article_id") != pl.col("article_id_right"))
+        .group_by(["article_id", "article_id_right"])
+        .len()
+        .rename({"article_id": "seed", "article_id_right": "partner", "len": "cooc"})
+    )
+
+    top = (
+        pairs.sort(["seed", "cooc"], descending=[False, True])
+        .group_by("seed", maintain_order=True)
+        .head(top_partners)
+    )
+
+    seeds = (
+        train.filter(pl.col("week") > last - cust_recent_weeks)
+        .join(pl.DataFrame({"customer_id": valid_customers}), on="customer_id", how="inner")
+        .select(["customer_id", "article_id"]).unique()
+        .rename({"article_id": "seed"})
+    )
+
+    cands = (
+        seeds.join(top.select(["seed", "partner"]), on="seed", how="inner")
+        .select(["customer_id", "partner"])
+        .rename({"partner": "article_id"})
+        .unique()
+        .with_columns(pl.lit("item2item").alias("method"))
     )
     return cands
