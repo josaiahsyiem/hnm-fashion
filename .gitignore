@@ -216,3 +216,15 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Data — never commit the dataset or generated artifacts
+data/raw/*
+data/processed/*
+data/candidates/*
+data/features/*
+!data/**/.gitkeep
+
+# Models & submissions
+models/*
+!models/.gitkeep
+submissions/*.csv
