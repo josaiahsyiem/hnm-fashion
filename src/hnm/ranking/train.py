@@ -14,7 +14,8 @@ FEATURES = [
     "art_weeks_since_last_sold", "art_recent_buys",
     "cust_total_buys", "cust_unique_articles", "cust_mean_price",
     "cust_mean_channel", "cust_weeks_since_last_buy", "cust_age",
-    "cust_art_prior_buys", "cust_group_prior_buys",
+    "cust_art_prior_buys",
+    "cust_type_affinity", "cust_dept_affinity", "cust_colour_affinity",
 ]
 
 

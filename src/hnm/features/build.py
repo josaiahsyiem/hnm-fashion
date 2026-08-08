@@ -64,27 +64,44 @@ def customer_features(train: pl.DataFrame, customers: pl.DataFrame) -> pl.DataFr
 
 def interaction_features(candidates: pl.DataFrame, train: pl.DataFrame,
                          articles: pl.DataFrame) -> pl.DataFrame:
-    """Per-pair signals: prior buys of this exact article, and of its group."""
-    # How many times each customer bought each article in train.
+    """Per-pair signals: prior buys of this article, plus customer affinity
+    to this article's department, product-type, and colour.
+
+    Affinity features vary strongly across candidates (unlike the near-constant
+    recency features), so they give the ranker real customer-article 'fit' signal.
+    """
+    # 1. Prior buys of this exact article.
     pair_counts = (
         train.group_by(["customer_id", "article_id"])
         .agg(pl.len().alias("cust_art_prior_buys"))
     )
-
     cands = candidates.join(pair_counts, on=["customer_id", "article_id"], how="left") \
                       .with_columns(pl.col("cust_art_prior_buys").fill_null(0))
 
-    # Product-group affinity: has the customer bought this article's group before?
-    art_group = articles.select(["article_id", "product_group_name"])
-    train_g = train.join(art_group, on="article_id", how="left")
-    cust_group = (
-        train_g.group_by(["customer_id", "product_group_name"])
-        .agg(pl.len().alias("cust_group_prior_buys"))
-    )
-    cands = cands.join(art_group, on="article_id", how="left") \
-                 .join(cust_group, on=["customer_id", "product_group_name"], how="left") \
-                 .with_columns(pl.col("cust_group_prior_buys").fill_null(0)) \
-                 .drop("product_group_name")
+    # Article attribute lookup.
+    attrs = articles.select([
+        "article_id", "product_type_name", "department_name", "colour_group_name",
+    ])
+    train_a = train.join(attrs, on="article_id", how="left")
+
+    # 2. Build a customer-affinity feature for each attribute.
+    for col, short in [
+        ("product_type_name", "type"),
+        ("department_name", "dept"),
+        ("colour_group_name", "colour"),
+    ]:
+        aff = (
+            train_a.group_by(["customer_id", col])
+            .agg(pl.len().alias(f"cust_{short}_affinity"))
+        )
+        cands = (
+            cands.join(attrs.select(["article_id", col]),
+                       on="article_id", how="left")
+            .join(aff, on=["customer_id", col], how="left")
+            .with_columns(pl.col(f"cust_{short}_affinity").fill_null(0))
+            .drop(col)
+        )
+
     return cands
 
 
